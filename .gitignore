@@ -1,0 +1,24 @@
+# Yapılandırma ve Yerel Ayarlar
+config.env
+.env
+
+# Modeller ve İndirilen Dosyalar
+models/
+*.gguf
+*.patch
+
+# llama.cpp Derleme ve Çalışma Zamanı
+llama.cpp/
+build/
+
+# Loglar ve Süreç Dosyaları
+*.log
+*.pid
+
+# Python ve İşletim Sistemi Kalıntıları
+__pycache__/
+*.py[cod]
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
