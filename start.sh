@@ -34,7 +34,7 @@ MODELS_DIR="${MODELS_DIR:-$WORKSPACE_DIR/models/qwen38}"
 MODEL_FILE="${MODEL_FILE:-Qwen3.8-27B-Uncensored-HauhauCS-Aggressive-Q8_K_P.gguf}"
 DRAFT_MODEL_FILE="${DRAFT_MODEL_FILE:-Qwen3.8-27B-Uncensored-HauhauCS-Aggressive-FastMTP-32K.gguf}"
 
-HOST="${HOST:-0.0.0.0}"
+HOST="${HOST:-127.0.0.1}"
 PORT="${PORT:-8081}"
 CTX_SIZE="${CTX_SIZE:-262144}"
 N_GPU_LAYERS="${N_GPU_LAYERS:-999}"
@@ -50,6 +50,40 @@ REASONING="${REASONING:-on}"
 
 LOG_FILE="${LOG_FILE:-$WORKSPACE_DIR/qwen.log}"
 PID_FILE="${PID_FILE:-$WORKSPACE_DIR/llama-server.pid}"
+API_KEY_FILE="${API_KEY_FILE:-$WORKSPACE_DIR/llama-api.key}"
+
+AUTH_ARGS=()
+API_KEY_SOURCE=""
+
+ensure_api_key() {
+    local api_key=""
+
+    if [ -f "$API_KEY_FILE" ]; then
+        api_key=$(awk 'NF && $1 !~ /^#/ { print; exit }' "$API_KEY_FILE" 2>/dev/null || true)
+    fi
+
+    if [ -z "$api_key" ]; then
+        mkdir -p "$(dirname "$API_KEY_FILE")"
+        umask 077
+        if command -v openssl &>/dev/null; then
+            api_key="sk-$(openssl rand -hex 32)"
+        else
+            api_key="sk-$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')"
+        fi
+        printf '%s\n' "$api_key" > "$API_KEY_FILE"
+        chmod 600 "$API_KEY_FILE"
+        API_KEY_SOURCE="otomatik üretildi"
+    else
+        chmod 600 "$API_KEY_FILE" 2>/dev/null || true
+        API_KEY_SOURCE="mevcut key dosyasından yüklendi"
+    fi
+
+    AUTH_ARGS=(--api-key-file "$API_KEY_FILE")
+}
+
+read_api_key() {
+    awk 'NF && $1 !~ /^#/ { print; exit }' "$API_KEY_FILE" 2>/dev/null || true
+}
 
 DAEMON_MODE=false
 
@@ -129,6 +163,9 @@ if [ -f "$PID_FILE" ]; then
     fi
 fi
 
+# API key kullanıcıdan istenmez; ilk çalıştırmada otomatik üretilir ve yeniden kullanılır.
+ensure_api_key
+
 # Port çakışması kontrolü
 if command -v lsof &>/dev/null; then
     if lsof -i :"$PORT" &>/dev/null; then
@@ -142,6 +179,7 @@ echo -e "${CYAN}================================================================
 echo -e "Ana Model      : $MAIN_MODEL_PATH"
 echo -e "Draft Model    : $DRAFT_MODEL_PATH"
 echo -e "Port / Host    : $HOST:$PORT"
+echo -e "API Key Auth   : AKTİF ($API_KEY_SOURCE)"
 echo -e "Context Size   : $CTX_SIZE"
 echo -e "Speculative MTP: $SPEC_TYPE (n-max: $SPEC_DRAFT_N_MAX, ngl: $SPEC_DRAFT_NGL)"
 echo -e "Flash Attention: $FLASH_ATTN | Reasoning: $REASONING"
@@ -164,9 +202,14 @@ SERVER_CMD=(
     --parallel "$PARALLEL"
     --jinja
     --reasoning "$REASONING"
+    "${AUTH_ARGS[@]}"
     --host "$HOST"
     --port "$PORT"
 )
+
+API_KEY_VALUE="$(read_api_key)"
+echo -e "API Key        : ${YELLOW}${API_KEY_VALUE}${NC}"
+echo -e "API Key dosyası: $API_KEY_FILE"
 
 if [ "$DAEMON_MODE" = true ]; then
     log_info "Sunucu arka planda başlatılıyor..."

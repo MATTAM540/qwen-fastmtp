@@ -36,6 +36,40 @@ LLAMA_DIR="$WORKSPACE_DIR/llama.cpp"
 MODELS_DIR="$WORKSPACE_DIR/models/qwen38"
 LOG_FILE="$WORKSPACE_DIR/qwen.log"
 PID_FILE="$WORKSPACE_DIR/llama-server.pid"
+API_KEY_FILE="${API_KEY_FILE:-$WORKSPACE_DIR/llama-api.key}"
+
+AUTH_ARGS=()
+API_KEY_SOURCE=""
+
+ensure_api_key() {
+    local api_key=""
+
+    if [ -f "$API_KEY_FILE" ]; then
+        api_key=$(awk 'NF && $1 !~ /^#/ { print; exit }' "$API_KEY_FILE" 2>/dev/null || true)
+    fi
+
+    if [ -z "$api_key" ]; then
+        mkdir -p "$(dirname "$API_KEY_FILE")"
+        umask 077
+        if command -v openssl &>/dev/null; then
+            api_key="sk-$(openssl rand -hex 32)"
+        else
+            api_key="sk-$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')"
+        fi
+        printf '%s\n' "$api_key" > "$API_KEY_FILE"
+        chmod 600 "$API_KEY_FILE"
+        API_KEY_SOURCE="otomatik üretildi"
+    else
+        chmod 600 "$API_KEY_FILE" 2>/dev/null || true
+        API_KEY_SOURCE="mevcut key dosyasından yüklendi"
+    fi
+
+    AUTH_ARGS=(--api-key-file "$API_KEY_FILE")
+}
+
+read_api_key() {
+    awk 'NF && $1 !~ /^#/ { print; exit }' "$API_KEY_FILE" 2>/dev/null || true
+}
 
 # 1. Adım: Sistem ve Donanım Analizi
 log_step "ADIM 1/6: Sistem ve Donanım Kaynakları Analiz Ediliyor"
@@ -205,8 +239,10 @@ if [ -f "$PID_FILE" ]; then
 fi
 
 PORT="${PORT:-8081}"
-HOST="${HOST:-0.0.0.0}"
+HOST="${HOST:-127.0.0.1}"
 CTX_SIZE="${CTX_SIZE:-262144}"
+
+ensure_api_key
 
 log_info "llama-server parametreleri:"
 echo -e "  - Ana Model     : $MODELS_DIR/$MODEL_FILE"
@@ -216,6 +252,7 @@ echo -e "  - Context Boyutu: $CTX_SIZE (256K)"
 echo -e "  - GPU Katmanları: 999 (Tüm katmanlar CUDA'ya offload)"
 echo -e "  - Flash Attn    : ON | Reasoning: ON | Jinja: ON"
 echo -e "  - Host / Port   : $HOST:$PORT"
+echo -e "  - API Key Auth   : AKTİF ($API_KEY_SOURCE)"
 echo -e "  - Log Dosyası   : $LOG_FILE"
 
 nohup "$LLAMA_DIR/build/bin/llama-server" \
@@ -233,6 +270,7 @@ nohup "$LLAMA_DIR/build/bin/llama-server" \
   --parallel 1 \
   --jinja \
   --reasoning on \
+  "${AUTH_ARGS[@]}" \
   --host "$HOST" \
   --port "$PORT" \
   > "$LOG_FILE" 2>&1 &
@@ -262,15 +300,45 @@ for i in {1..12}; do
 done
 echo -e "${CYAN}----------------------------------------------------------------${NC}"
 
-PUBLIC_IP=$(curl -s -m 3 https://ifconfig.me 2>/dev/null || echo "SUNUCU_IP")
-
 echo -e "\n${CYAN}================================================================${NC}"
 echo -e "${GREEN}${BOLD}       🎉 TEBRİKLER! QWEN3.8-27B FASTMTP HAZIR VE ÇALIŞIYOR     ${NC}"
 echo -e "${CYAN}================================================================${NC}"
 echo -e "Sunucu Süreç ID : ${GREEN}${BOLD}$NEW_PID${NC}"
 echo -e "Yerel API       : ${GREEN}http://127.0.0.1:$PORT/v1${NC}"
-echo -e "Dış Erişim API  : ${GREEN}http://$PUBLIC_IP:$PORT/v1${NC}"
+echo -e "API Key         : ${YELLOW}$(read_api_key)${NC}"
+echo -e "API Key dosyası : ${BLUE}$API_KEY_FILE${NC}"
 echo -e "Log Dosyası     : ${BLUE}$LOG_FILE${NC}"
+
+TUNNEL_LOG_FILE="${TUNNEL_LOG_FILE:-$WORKSPACE_DIR/cloudflared.log}"
+TUNNEL_PID_FILE="${TUNNEL_PID_FILE:-$WORKSPACE_DIR/cloudflared.pid}"
+PUBLIC_URL=""
+
+if command -v cloudflared &>/dev/null; then
+    log_info "Hesapsız Cloudflare Quick Tunnel başlatılıyor..."
+    nohup cloudflared tunnel --url "http://127.0.0.1:$PORT" > "$TUNNEL_LOG_FILE" 2>&1 &
+    TUNNEL_PID=$!
+    echo "$TUNNEL_PID" > "$TUNNEL_PID_FILE"
+
+    for _ in $(seq 1 10); do
+        sleep 1
+        PUBLIC_URL=$(sed -nE 's#.*(https://[-[:alnum:]]+\.trycloudflare\.com).*#\1#p' "$TUNNEL_LOG_FILE" | head -n 1)
+        if [ -n "$PUBLIC_URL" ]; then
+            break
+        fi
+        if ! kill -0 "$TUNNEL_PID" 2>/dev/null; then
+            break
+        fi
+    done
+
+    if [ -n "$PUBLIC_URL" ] && kill -0 "$TUNNEL_PID" 2>/dev/null; then
+        echo -e "Public link     : ${GREEN}${PUBLIC_URL}${NC}"
+        echo -e "OpenAI Base URL : ${GREEN}${PUBLIC_URL}/v1${NC}"
+    else
+        log_warn "Quick Tunnel linki üretilemedi; log: $TUNNEL_LOG_FILE"
+    fi
+else
+    log_warn "cloudflared bulunamadığı için public link oluşturulamadı."
+fi
 echo -e ""
 echo -e "${YELLOW}Sunucuyu Yönetmek İçin:${NC}"
 echo -e "  Canlı logları takip et : ${CYAN}tail -f $LOG_FILE${NC}"

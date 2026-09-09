@@ -21,7 +21,8 @@ curl -sSL https://raw.githubusercontent.com/MATTAM540/qwen-fastmtp/main/bootstra
 > 2. `llama.cpp`'yi klonlar ve **HauhauCS FastMTP** yamasını uygular.
 > 3. `llama.cpp`'yi CUDA donanım hızlandırmasıyla derler.
 > 4. Hugging Face üzerinden **Qwen3.8-27B Q8_K_P** ve **FastMTP 32K Draft** modellerini otomatik indirir.
-> 5. Sunucuyu arka planda (daemon) **256k Context**, **Flash Attention** ve **Port 8081** ile başlatır!
+> 5. Sunucuyu arka planda (daemon) **256k Context**, **Flash Attention** ve **API key koruması** ile başlatır.
+> 6. Hazır gelen `cloudflared` ile hesapsız geçici Quick Tunnel açar; sonunda API key ve public linki yazdırır.
 
 ---
 
@@ -31,7 +32,9 @@ curl -sSL https://raw.githubusercontent.com/MATTAM540/qwen-fastmtp/main/bootstra
 - 🎯 **Sıfır Konfigürasyon**: Tek satırlık script tüm süreci uçtan uca tamamlar.
 - 🛠️ **Merkezi CLI (`manage.sh`)**: Sunucuyu durdurma, başlatma, durum ve log takibi.
 - 🧠 **256K Context Desteği**: Geniş bağlam boyutu (`ctx-size: 262144`), Flash Attention ve Jinja şablon desteği.
-- 🔌 **OpenAI Uyumlu API**: OpenCode, Cline, Continue, Cursor ve standart OpenAI SDK'ları ile tam uyumlu API endpoint (`http://0.0.0.0:8081/v1`).
+- 🔌 **OpenAI Uyumlu API**: OpenCode, Cline, Continue, Cursor ve standart OpenAI SDK'ları ile tam uyumlu API endpoint (`http://127.0.0.1:8081/v1`).
+- 🔐 **Otomatik API Key**: İlk başlatmada rastgele ve güçlü bir key üretir; kullanıcıdan key istemez.
+- ☁️ **Geçici Cloudflare Quick Tunnel**: Hesap veya domain gerektirmeden public `trycloudflare.com` adresi açabilir.
 
 ---
 
@@ -65,7 +68,13 @@ cd /workspace/qwen-fastmtp
 ./manage.sh restart      # Sunucuyu yeniden başlatır
 ./manage.sh status       # Sunucu, HTTP sağlık durumu ve GPU VRAM durumunu görüntüler
 ./manage.sh logs         # Canlı log akışını açar (Ctrl+C ile çıkılır)
+./manage.sh start-public # Sunucu + hesapsız geçici Cloudflare Tunnel
+./manage.sh tunnel-stop  # Geçici Tunnel'ı durdurur
+./manage.sh tunnel-status # Public linki ve Tunnel durumunu gösterir
+./manage.sh api-key      # Otomatik üretilen API key'i gösterir
 ```
+
+`start-public` komutu tamamlandığında public link ve API key terminale yazdırılır. Tek seferlik adresi kaydedin; Tunnel durduğunda veya yeniden başlatıldığında adres değişebilir.
 
 ---
 
@@ -86,9 +95,12 @@ WORKSPACE_DIR="/workspace"
 LLAMA_DIR="/workspace/llama.cpp"
 MODELS_DIR="/workspace/models/qwen38"
 
-# Port ve Ağ
-HOST="0.0.0.0"
+# Port ve Ağ (Quick Tunnel için loopback önerilir)
+HOST="127.0.0.1"
 PORT="8081"
+
+# API key dosyası (ilk başlatmada otomatik oluşturulur)
+API_KEY_FILE="/workspace/llama-api.key"
 
 # Çıkarım ve Model Ayarları
 CTX_SIZE="262144"           # 256k Context Boyutu
@@ -106,13 +118,14 @@ REASONING="on"
 
 ## 🌐 API Kullanımı ve Entegrasyon
 
-Sunucu başlatıldığında OpenAI uyumlu standart REST API (`http://<SUNUCU_IP>:8081/v1`) aktif hale gelir.
+Sunucu başlatıldığında OpenAI uyumlu standart REST API (`http://127.0.0.1:8081/v1`) aktif hale gelir; `start-public` sonrası dış erişim için yazdırılan Quick Tunnel adresini kullanın.
 
 ### cURL ile Test:
 
 ```bash
 curl http://127.0.0.1:8081/v1/chat/completions \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $(./manage.sh api-key)" \
   -d '{
     "model": "qwen3.8",
     "messages": [
@@ -129,8 +142,8 @@ curl http://127.0.0.1:8081/v1/chat/completions \
 from openai import OpenAI
 
 client = OpenAI(
-    base_url="http://<SUNUCU_IP>:8081/v1",
-    api_key="sk-no-key-required"  # Yerel sunucuda rastgele bir string yeterlidir
+    base_url="https://<QUICK_TUNNEL_ADRESI>/v1",
+    api_key="<./manage.sh api-key çıktısı>"
 )
 
 response = client.chat.completions.create(
@@ -145,8 +158,19 @@ print(response.choices[0].message.content)
 
 ### OpenCode / Continue / Cline Entegrasyonu:
 - **Provider**: `OpenAI Compatible`
-- **Base URL**: `http://<SUNUCU_IP_VEYA_HOST>:8081/v1`
+- **Base URL**: `https://<QUICK_TUNNEL_ADRESI>/v1`
+- **API Key**: `./manage.sh api-key` çıktısı
 - **Model Name**: `qwen3.8` veya `default`
+
+### Hesapsız Geçici Cloudflare Tunnel
+
+Ardından tek komutla llama sunucusunu ve geçici tunnel'ı başlatın:
+
+```bash
+./manage.sh start-public
+```
+
+Bu yöntem Cloudflare hesabı/domain gerektirmez ve rastgele bir `https://*.trycloudflare.com` adresi üretir. Geliştirme/test amaçlıdır; adres kalıcı değildir, Quick Tunnel'lar 200 eşzamanlı istekle sınırlıdır ve SSE/streaming desteklemez.
 
 ---
 
@@ -161,6 +185,7 @@ print(response.choices[0].message.content)
 ├── stop.sh              # Güvenli durdurma betiği
 ├── status.sh            # Sistem, API ve GPU durum kontrolü
 ├── manage.sh            # Merkezi yönetim CLI arayüzü
+├── tunnel.sh            # Hesapsız geçici Cloudflare Quick Tunnel yönetimi
 ├── .gitignore           # Model ve log dosyalarını hariç tutan gitignore
 ├── LICENSE              # MIT Lisansı
 └── README.md            # Detaylı dokümantasyon

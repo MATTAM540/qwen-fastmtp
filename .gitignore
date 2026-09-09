@@ -1,6 +1,7 @@
 # Yapılandırma ve Yerel Ayarlar
 config.env
 .env
+llama-api.key
 
 # Modeller ve İndirilen Dosyalar
 models/

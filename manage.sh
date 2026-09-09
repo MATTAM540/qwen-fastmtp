@@ -27,9 +27,41 @@ usage() {
     echo -e "  ${GREEN}restart${NC}       Sunucuyu yeniden başlatır"
     echo -e "  ${GREEN}status${NC}        Sunucu, API ve GPU durumunu kontrol eder"
     echo -e "  ${GREEN}logs${NC}          Sunucu loglarını canlı olarak takip eder (tail -f)"
+    echo -e "  ${GREEN}start-public${NC}  Sunucuyu ve hesapsız geçici Cloudflare Tunnel'ı başlatır"
+    echo -e "  ${GREEN}tunnel${NC}       Geçici Cloudflare Tunnel'ı başlatır"
+    echo -e "  ${GREEN}tunnel-stop${NC}  Geçici Cloudflare Tunnel'ı durdurur"
+    echo -e "  ${GREEN}tunnel-status${NC} Tunnel durumunu ve public linki gösterir"
+    echo -e "  ${GREEN}tunnel-logs${NC}  Tunnel loglarını canlı takip eder"
+    echo -e "  ${GREEN}tunnel-install${NC} cloudflared'ın hazır olduğunu kontrol eder"
+    echo -e "  ${GREEN}api-key${NC}      Otomatik oluşturulan API key'i gösterir"
     echo -e "  ${GREEN}help${NC}          Bu yardım ekranını gösterir"
     echo -e "${CYAN}================================================================${NC}"
     exit 0
+}
+
+show_api_key() {
+    if [ -f "$SCRIPT_DIR/config.env" ]; then
+        # shellcheck source=/dev/null
+        source "$SCRIPT_DIR/config.env"
+    elif [ -f "$SCRIPT_DIR/config.env.example" ]; then
+        # shellcheck source=/dev/null
+        source "$SCRIPT_DIR/config.env.example"
+    fi
+
+    local workspace_dir="${WORKSPACE_DIR:-/workspace}"
+    local api_key_file="${API_KEY_FILE:-$workspace_dir/llama-api.key}"
+    local api_key=""
+
+    if [ -f "$api_key_file" ]; then
+        api_key=$(awk 'NF && $1 !~ /^#/ { print; exit }' "$api_key_file" 2>/dev/null || true)
+    fi
+
+    if [ -n "$api_key" ]; then
+        echo "$api_key"
+    else
+        echo "API key henüz oluşturulmadı. Önce ./manage.sh start çalıştırın." >&2
+        return 1
+    fi
 }
 
 COMMAND="${1:-}"
@@ -45,6 +77,10 @@ case "$COMMAND" in
     start-live)
         bash "$SCRIPT_DIR/start.sh" "$@"
         ;;
+    start-public)
+        bash "$SCRIPT_DIR/start.sh" --daemon "$@"
+        bash "$SCRIPT_DIR/tunnel.sh" start
+        ;;
     stop)
         bash "$SCRIPT_DIR/stop.sh" "$@"
         ;;
@@ -58,6 +94,24 @@ case "$COMMAND" in
         ;;
     logs)
         bash "$SCRIPT_DIR/status.sh" --follow
+        ;;
+    tunnel|tunnel-start)
+        bash "$SCRIPT_DIR/tunnel.sh" start
+        ;;
+    tunnel-stop)
+        bash "$SCRIPT_DIR/tunnel.sh" stop
+        ;;
+    tunnel-status)
+        bash "$SCRIPT_DIR/tunnel.sh" status
+        ;;
+    tunnel-logs)
+        bash "$SCRIPT_DIR/tunnel.sh" logs
+        ;;
+    tunnel-install)
+        bash "$SCRIPT_DIR/tunnel.sh" install
+        ;;
+    api-key)
+        show_api_key
         ;;
     help|--help|-h|"")
         usage
