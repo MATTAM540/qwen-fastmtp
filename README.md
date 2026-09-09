@@ -74,7 +74,7 @@ cd /workspace/qwen-fastmtp
 ./manage.sh api-key      # Otomatik üretilen API key'i gösterir
 ```
 
-`start-public` komutu tamamlandığında public link ve API key terminale yazdırılır. Tek seferlik adresi kaydedin; Tunnel durduğunda veya yeniden başlatıldığında adres değişebilir.
+`start-public` komutu tamamlandığında AI context, model adı, public link, OpenAI Base URL ve API key tek bir kopyalanabilir JSON bilgi kutusunda yazdırılır. Tek seferlik adresi kaydedin; Tunnel durduğunda veya yeniden başlatıldığında adres değişebilir.
 
 ---
 
@@ -101,6 +101,7 @@ PORT="8081"
 
 # API key dosyası (ilk başlatmada otomatik oluşturulur)
 API_KEY_FILE="/workspace/llama-api.key"
+MODEL_NAME="qwen3.8"
 
 # Çıkarım ve Model Ayarları
 CTX_SIZE="262144"           # 256k Context Boyutu

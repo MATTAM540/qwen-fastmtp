@@ -199,6 +199,7 @@ fi
 HF_REPO="HauhauCS/Qwen3.8-27B-Uncensored-HauhauCS-Aggressive-MTP-GGUF"
 MODEL_FILE="Qwen3.8-27B-Uncensored-HauhauCS-Aggressive-Q8_K_P.gguf"
 DRAFT_MODEL_FILE="Qwen3.8-27B-Uncensored-HauhauCS-Aggressive-FastMTP-32K.gguf"
+MODEL_NAME="${MODEL_NAME:-qwen3.8}"
 
 cd "$MODELS_DIR"
 
@@ -270,6 +271,7 @@ nohup "$LLAMA_DIR/build/bin/llama-server" \
   --parallel 1 \
   --jinja \
   --reasoning on \
+  --alias "$MODEL_NAME" \
   "${AUTH_ARGS[@]}" \
   --host "$HOST" \
   --port "$PORT" \
@@ -305,8 +307,6 @@ echo -e "${GREEN}${BOLD}       🎉 TEBRİKLER! QWEN3.8-27B FASTMTP HAZIR VE ÇA
 echo -e "${CYAN}================================================================${NC}"
 echo -e "Sunucu Süreç ID : ${GREEN}${BOLD}$NEW_PID${NC}"
 echo -e "Yerel API       : ${GREEN}http://127.0.0.1:$PORT/v1${NC}"
-echo -e "API Key         : ${YELLOW}$(read_api_key)${NC}"
-echo -e "API Key dosyası : ${BLUE}$API_KEY_FILE${NC}"
 echo -e "Log Dosyası     : ${BLUE}$LOG_FILE${NC}"
 
 TUNNEL_LOG_FILE="${TUNNEL_LOG_FILE:-$WORKSPACE_DIR/cloudflared.log}"
@@ -330,15 +330,34 @@ if command -v cloudflared &>/dev/null; then
         fi
     done
 
-    if [ -n "$PUBLIC_URL" ] && kill -0 "$TUNNEL_PID" 2>/dev/null; then
-        echo -e "Public link     : ${GREEN}${PUBLIC_URL}${NC}"
-        echo -e "OpenAI Base URL : ${GREEN}${PUBLIC_URL}/v1${NC}"
-    else
+    if [ -z "$PUBLIC_URL" ] || ! kill -0 "$TUNNEL_PID" 2>/dev/null; then
         log_warn "Quick Tunnel linki üretilemedi; log: $TUNNEL_LOG_FILE"
     fi
 else
     log_warn "cloudflared bulunamadığı için public link oluşturulamadı."
 fi
+
+echo -e "${CYAN}================================================================${NC}"
+echo -e "${GREEN}${BOLD}                    AI API BİLGİLENDİRME                       ${NC}"
+echo -e "${CYAN}================================================================${NC}"
+echo -e "AI context      : ${GREEN}${CTX_SIZE} token${NC}"
+echo -e "Model adı       : ${GREEN}${MODEL_NAME}${NC}"
+if [ -n "$PUBLIC_URL" ]; then
+    BASE_URL="${PUBLIC_URL}/v1"
+    echo -e "Public link     : ${GREEN}${PUBLIC_URL}${NC}"
+    echo -e "OpenAI Base URL : ${GREEN}${BASE_URL}${NC}"
+else
+    BASE_URL="http://127.0.0.1:${PORT}/v1"
+    echo -e "Public link     : ${YELLOW}oluşturulamadı${NC}"
+fi
+API_KEY_VALUE="$(read_api_key)"
+echo -e "API key         : ${YELLOW}${API_KEY_VALUE}${NC}"
+echo -e "API key dosyası : ${BLUE}$API_KEY_FILE${NC}"
+echo ""
+echo "Kopyalanabilir OpenCode yapılandırma özeti:"
+printf '{\n  "provider": "openai-compatible",\n  "base_url": "%s",\n  "api_key": "%s",\n  "model": "%s",\n  "context_length": %s\n}\n' \
+    "$BASE_URL" "$API_KEY_VALUE" "$MODEL_NAME" "$CTX_SIZE"
+echo -e "${CYAN}================================================================${NC}"
 echo -e ""
 echo -e "${YELLOW}Sunucuyu Yönetmek İçin:${NC}"
 echo -e "  Canlı logları takip et : ${CYAN}tail -f $LOG_FILE${NC}"

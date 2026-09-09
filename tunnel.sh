@@ -28,6 +28,8 @@ fi
 
 WORKSPACE_DIR="${WORKSPACE_DIR:-/workspace}"
 PORT="${PORT:-8081}"
+CTX_SIZE="${CTX_SIZE:-262144}"
+MODEL_NAME="${MODEL_NAME:-qwen3.8}"
 API_KEY_FILE="${API_KEY_FILE:-$WORKSPACE_DIR/llama-api.key}"
 TUNNEL_URL="${TUNNEL_URL:-http://127.0.0.1:$PORT}"
 TUNNEL_LOG_FILE="${TUNNEL_LOG_FILE:-$WORKSPACE_DIR/cloudflared.log}"
@@ -79,6 +81,7 @@ read_api_key() {
 print_connection_info() {
     local public_url="${1:-}"
     local api_key="$(read_api_key)"
+    local base_url=""
 
     if [ -z "$public_url" ]; then
         public_url="$(extract_public_url)"
@@ -88,8 +91,9 @@ print_connection_info() {
     echo -e "${GREEN}                   UZAK ERİŞİM HAZIR                            ${NC}"
     echo -e "${CYAN}================================================================${NC}"
     if [ -n "$public_url" ]; then
+        base_url="${public_url}/v1"
         echo -e "Public link    : ${GREEN}${public_url}${NC}"
-        echo -e "OpenAI Base URL: ${GREEN}${public_url}/v1${NC}"
+        echo -e "OpenAI Base URL: ${GREEN}${base_url}${NC}"
     else
         echo -e "Public link    : ${YELLOW}URL logda henüz görünmedi; $TUNNEL_LOG_FILE dosyasını kontrol edin.${NC}"
     fi
@@ -99,6 +103,10 @@ print_connection_info() {
         echo -e "API key        : ${YELLOW}Sunucu başlatılınca otomatik üretilecek.${NC}"
     fi
     echo -e "API key header : Authorization: Bearer <API_KEY>"
+    echo ""
+    echo "Kopyalanabilir OpenCode yapılandırma özeti:"
+    printf '{\n  "provider": "openai-compatible",\n  "base_url": "%s",\n  "api_key": "%s",\n  "model": "%s",\n  "context_length": %s\n}\n' \
+        "$base_url" "$api_key" "$MODEL_NAME" "$CTX_SIZE"
     echo -e "${CYAN}================================================================${NC}"
 }
 
