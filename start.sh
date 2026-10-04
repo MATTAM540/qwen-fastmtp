@@ -191,10 +191,11 @@ echo -e "${CYAN}================================================================
 SERVER_CMD=(
     "$LLAMA_SERVER_BIN"
     --model "$MAIN_MODEL_PATH"
-    --model-draft "$DRAFT_MODEL_PATH"
+    --spec-draft-model "$DRAFT_MODEL_PATH"
     --spec-type "$SPEC_TYPE"
     --spec-draft-n-max "$SPEC_DRAFT_N_MAX"
     --spec-draft-ngl "$SPEC_DRAFT_NGL"
+    --spec-draft-p-min 0
     --ctx-size "$CTX_SIZE"
     --n-gpu-layers "$N_GPU_LAYERS"
     --split-mode "$SPLIT_MODE"

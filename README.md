@@ -18,11 +18,13 @@ curl -sSL https://raw.githubusercontent.com/MATTAM540/qwen-fastmtp/main/bootstra
 
 > **Bu komut tek başına ne yapar?**
 > 1. Gerekli tüm sistem bağımlılıklarını (`cmake`, `build-essential`, `cuda` derleme araçları) kurar.
-> 2. `llama.cpp`'yi klonlar ve **HauhauCS FastMTP** yamasını uygular.
+> 2. Yama ile uyumlu sabit `llama.cpp` commit'ini (`4df29be4`) klonlar ve **HauhauCS FastMTP** yamasını uygular.
 > 3. `llama.cpp`'yi CUDA donanım hızlandırmasıyla derler.
 > 4. Hugging Face üzerinden **Qwen3.8-27B Q8_K_P** ve **FastMTP 32K Draft** modellerini otomatik indirir.
 > 5. Sunucuyu arka planda (daemon) **256k Context**, **Flash Attention** ve **API key koruması** ile başlatır.
 > 6. Hazır gelen `cloudflared` ile hesapsız geçici Quick Tunnel açar; sonunda API key ve public linki yazdırır.
+
+Kurulum, llama.cpp ve Hugging Face dosyalarının sürümlerini sabitler; patch ile iki GGUF dosyasının SHA-256 değerlerini kontrol eder. Yamayı temiz kaynakta uygular veya önceden tam uygulanmışsa bunu doğrular. Commit uyuşmazsa ya da yama kısmen uygulanmışsa derlemeyi durdurur; kısmi yamayla devam etmez.
 
 ---
 
@@ -93,6 +95,8 @@ nano config.env
 # Dizinler
 WORKSPACE_DIR="/workspace"
 LLAMA_DIR="/workspace/llama.cpp"
+LLAMA_CPP_COMMIT="4df29be4f4c3673f428170fda944a5b19f743bb8"
+HF_REVISION="993a5971fda8f30dd1b7eb2654792ba4415c7460"
 MODELS_DIR="/workspace/models/qwen38"
 
 # Port ve Ağ (Quick Tunnel için loopback önerilir)

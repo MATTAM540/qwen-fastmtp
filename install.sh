@@ -38,9 +38,28 @@ WORKSPACE_DIR="${WORKSPACE_DIR:-/workspace}"
 LLAMA_DIR="${LLAMA_DIR:-$WORKSPACE_DIR/llama.cpp}"
 MODELS_DIR="${MODELS_DIR:-$WORKSPACE_DIR/models/qwen38}"
 HF_REPO="${HF_REPO:-HauhauCS/Qwen3.8-27B-Uncensored-HauhauCS-Aggressive-MTP-GGUF}"
-PATCH_URL="${PATCH_URL:-https://huggingface.co/HauhauCS/Qwen3.8-27B-Uncensored-HauhauCS-Aggressive-MTP-GGUF/resolve/main/HauhauCS-FastMTP-llama.cpp.patch}"
+HF_REVISION="${HF_REVISION:-993a5971fda8f30dd1b7eb2654792ba4415c7460}"
+PATCH_URL="${PATCH_URL:-https://huggingface.co/$HF_REPO/resolve/$HF_REVISION/HauhauCS-FastMTP-llama.cpp.patch}"
+PATCH_SHA256="${PATCH_SHA256:-981285400b59dc45cf99936b6ff66d4b3aa0f1b532f85fa51418cb407e51d615}"
+LLAMA_CPP_COMMIT="${LLAMA_CPP_COMMIT:-4df29be4f4c3673f428170fda944a5b19f743bb8}"
 MODEL_FILE="${MODEL_FILE:-Qwen3.8-27B-Uncensored-HauhauCS-Aggressive-Q8_K_P.gguf}"
 DRAFT_MODEL_FILE="${DRAFT_MODEL_FILE:-Qwen3.8-27B-Uncensored-HauhauCS-Aggressive-FastMTP-32K.gguf}"
+MODEL_SHA256="${MODEL_SHA256:-4e7735df4d1e2ec721f2551f531b815702a2f89123238c564797eda4b0304bc2}"
+DRAFT_MODEL_SHA256="${DRAFT_MODEL_SHA256:-115e618e1f73cb50817ed5856f0551c6bf9c3d94df96f440eaca78dc63b8968b}"
+
+verify_sha256() {
+    local file_path="$1" expected="$2" label="$3" actual
+    if [ ! -s "$file_path" ]; then
+        log_error "$label bulunamadı veya boş: $file_path"
+        exit 1
+    fi
+    actual=$(sha256sum "$file_path" | awk '{print $1}')
+    if [ "$actual" != "$expected" ]; then
+        log_error "$label SHA-256 doğrulaması başarısız. Beklenen: $expected | Bulunan: $actual"
+        exit 1
+    fi
+    log_success "$label SHA-256 doğrulandı."
+}
 
 # Dizin izin ve varlık kontrolü
 if [ ! -d "$WORKSPACE_DIR" ]; then
@@ -104,14 +123,11 @@ elif command -v apt &>/dev/null; then
     log_success "Temel sistem araçları hazır."
 fi
 
-# 3. Adım: llama.cpp Klonlama ve FastMTP Yaması
-log_step "ADIM 3/6: llama.cpp İndiriliyor ve FastMTP Yaması Uygulanıyor"
+# 3. Adım: llama.cpp sabit commit ve FastMTP yaması
+log_step "ADIM 3/6: Sabit llama.cpp Sürümü ve FastMTP Yaması Hazırlanıyor"
 if [ -d "$LLAMA_DIR/.git" ]; then
-    log_info "Mevcut llama.cpp dizini bulundu, güncelleniyor: $LLAMA_DIR"
+    log_info "Mevcut llama.cpp deposu bulundu: $LLAMA_DIR"
     cd "$LLAMA_DIR"
-    git fetch origin master
-    git checkout master
-    git pull origin master
 else
     log_info "llama.cpp GitHub deposundan klonlanıyor..."
     mkdir -p "$(dirname "$LLAMA_DIR")"
@@ -119,22 +135,40 @@ else
     cd "$LLAMA_DIR"
 fi
 
+CURRENT_LLAMA_COMMIT=$(git rev-parse HEAD)
+if [ "$CURRENT_LLAMA_COMMIT" != "$LLAMA_CPP_COMMIT" ]; then
+    if ! git diff --quiet || ! git diff --cached --quiet || [ -n "$(git ls-files --others --exclude-standard)" ]; then
+        log_error "llama.cpp deposu kirli ve sabit commit'e güvenle geçirilemiyor."
+        log_error "Değişiklikleri koruyun; temiz bir $LLAMA_DIR checkout'u hazırlayıp kurulumu yeniden çalıştırın."
+        exit 1
+    fi
+    git fetch origin
+    git checkout --detach "$LLAMA_CPP_COMMIT"
+fi
+
+ACTUAL_LLAMA_COMMIT=$(git rev-parse HEAD)
+if [ "$ACTUAL_LLAMA_COMMIT" != "$LLAMA_CPP_COMMIT" ]; then
+    log_error "Yanlış llama.cpp commit'i: $ACTUAL_LLAMA_COMMIT (beklenen: $LLAMA_CPP_COMMIT)"
+    exit 1
+fi
+log_success "llama.cpp commit'i sabitlendi: $ACTUAL_LLAMA_COMMIT"
+
 PATCH_TEMP="/tmp/HauhauCS-FastMTP.patch"
 log_info "FastMTP yaması Hugging Face üzerinden indiriliyor..."
-curl -L -o "$PATCH_TEMP" "$PATCH_URL"
+curl -fL --retry 3 -o "$PATCH_TEMP" "$PATCH_URL"
+verify_sha256 "$PATCH_TEMP" "$PATCH_SHA256" "FastMTP yaması"
 
 if git apply --check "$PATCH_TEMP" 2>/dev/null; then
     log_info "FastMTP yaması llama.cpp'ye uygulanıyor..."
     git apply --verbose "$PATCH_TEMP"
     log_success "FastMTP yaması başarıyla uygulandı."
     git diff --stat || true
+elif git apply --reverse --check "$PATCH_TEMP" 2>/dev/null; then
+    log_info "FastMTP yaması bu commit'e daha önce eksiksiz uygulanmış."
 else
-    if git diff --name-only HEAD | grep -q "qwen35.cpp" || git log -n 5 | grep -qi "FastMTP"; then
-        log_warn "FastMTP yaması zaten uygulanmış görünüyor, devam ediliyor."
-    else
-        log_warn "Yama doğrudan uygulanamadı. Zorla (rejects) deneniyor..."
-        git apply --reject "$PATCH_TEMP" || true
-    fi
+    log_error "FastMTP yaması bu llama.cpp commit'ine tam uygulanamıyor. Derleme durduruldu; kısmi yama uygulanmadı."
+    log_error "Beklenen taban: $LLAMA_CPP_COMMIT. llama.cpp dizinini temizleyip yeniden deneyin."
+    exit 1
 fi
 
 # 4. Adım: llama.cpp CUDA ile Derleme
@@ -186,18 +220,20 @@ if [ -f "$MODELS_DIR/$MODEL_FILE" ] && [ -s "$MODELS_DIR/$MODEL_FILE" ]; then
     log_success "Ana model dosyası zaten mevcut: $MODEL_FILE ($(du -h "$MODELS_DIR/$MODEL_FILE" | awk '{print $1}'))"
 else
     log_info "Ana model indiriliyor ($MODEL_FILE)... İlerleme çubuğu:"
-    $HF_CMD "$HF_REPO" "$MODEL_FILE" --local-dir "$MODELS_DIR"
+    $HF_CMD "$HF_REPO" "$MODEL_FILE" --revision "$HF_REVISION" --local-dir "$MODELS_DIR"
     log_success "Ana model başarıyla indirildi."
 fi
+verify_sha256 "$MODELS_DIR/$MODEL_FILE" "$MODEL_SHA256" "Ana model"
 
 # Draft model kontrolü ve indirme
 if [ -f "$MODELS_DIR/$DRAFT_MODEL_FILE" ] && [ -s "$MODELS_DIR/$DRAFT_MODEL_FILE" ]; then
     log_success "Draft model dosyası zaten mevcut: $DRAFT_MODEL_FILE ($(du -h "$MODELS_DIR/$DRAFT_MODEL_FILE" | awk '{print $1}'))"
 else
     log_info "FastMTP Draft modeli indiriliyor ($DRAFT_MODEL_FILE)..."
-    $HF_CMD "$HF_REPO" "$DRAFT_MODEL_FILE" --local-dir "$MODELS_DIR"
+    $HF_CMD "$HF_REPO" "$DRAFT_MODEL_FILE" --revision "$HF_REVISION" --local-dir "$MODELS_DIR"
     log_success "Draft model başarıyla indirildi."
 fi
+verify_sha256 "$MODELS_DIR/$DRAFT_MODEL_FILE" "$DRAFT_MODEL_SHA256" "FastMTP draft modeli"
 
 echo -e "\n${CYAN}================================================================${NC}"
 echo -e "${GREEN}${BOLD}             KURULUM BAŞARIYLA TAMAMLANDI!                    ${NC}"
